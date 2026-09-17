@@ -34,35 +34,27 @@ def analyze_defect_with_openai(
     if not model.strip():
         raise LLMSimilarityError("Enter an OpenAI model name.")
 
-    if client is None:
-        try:
-            import httpx
-            import truststore
-            from openai import OpenAI
-        except ImportError as error:  # pragma: no cover - installation issue
-            raise LLMSimilarityError(
-                "The OpenAI package is not installed. Run: pip install -r requirements.txt"
-            ) from error
-        # Use the operating-system trust store. This keeps TLS verification enabled
-        # while supporting managed/corporate Windows networks with a private root CA.
-        ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        client = OpenAI(
-            api_key=api_key,
-            http_client=httpx.Client(verify=ssl_context),
-        )
-
     started = time.perf_counter()
     try:
-        response = client.responses.create(
-            model=model.strip(),
-            store=False,
-            input=_build_prompt(defect, known_errors, historical_defects),
-        )
+        prompt = _build_prompt(defect, known_errors, historical_defects)
+        if client is None:
+            response = _call_responses_api(api_key, model.strip(), prompt)
+            raw_text = _response_output_text(response)
+            response_id = response.get("id")
+        else:
+            response = client.responses.create(
+                model=model.strip(),
+                store=False,
+                input=prompt,
+            )
+            raw_text = getattr(response, "output_text", "")
+            response_id = getattr(response, "id", None)
     except Exception as error:
-        raise LLMSimilarityError(f"OpenAI similarity analysis failed: {error}") from error
+        raise LLMSimilarityError(
+            f"OpenAI similarity analysis failed: {_error_details(error)}"
+        ) from error
 
     elapsed_ms = round((time.perf_counter() - started) * 1000)
-    raw_text = getattr(response, "output_text", "")
     parsed = _parse_json_object(raw_text)
     known_matches = _validated_matches(parsed.get("known_matches"), known_errors, "known")
     historical_matches = _validated_matches(
@@ -86,10 +78,59 @@ def analyze_defect_with_openai(
         similarity_metadata={
             "provider": "OpenAI",
             "model": model.strip(),
-            "response_id": getattr(response, "id", None),
+            "response_id": response_id,
             "duration_ms": elapsed_ms,
         },
     )
+
+
+def _call_responses_api(api_key: str, model: str, prompt: str) -> dict[str, Any]:
+    try:
+        import httpx
+        import truststore
+    except ImportError as error:  # pragma: no cover - installation issue
+        raise LLMSimilarityError(
+            "HTTP dependencies are not installed. Run: pip install -r requirements.txt"
+        ) from error
+
+    # Use the operating-system trust store. This keeps TLS verification enabled
+    # while supporting managed/corporate Windows networks with a private root CA.
+    ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    with httpx.Client(verify=ssl_context, timeout=30.0) as http_client:
+        response = http_client.post(
+            "https://api.openai.com/v1/responses",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={"model": model, "input": prompt, "store": False},
+        )
+
+    if response.is_error:
+        try:
+            message = response.json().get("error", {}).get("message")
+        except (ValueError, AttributeError):
+            message = None
+        detail = message or response.reason_phrase
+        raise LLMSimilarityError(f"OpenAI API returned HTTP {response.status_code}: {detail}")
+
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise LLMSimilarityError("OpenAI returned an unexpected response body.")
+    return payload
+
+
+def _response_output_text(response: dict[str, Any]) -> str:
+    texts: list[str] = []
+    for output in response.get("output", []):
+        if not isinstance(output, dict):
+            continue
+        for content in output.get("content", []):
+            if isinstance(content, dict) and content.get("type") == "output_text":
+                texts.append(str(content.get("text", "")))
+    if not texts:
+        raise LLMSimilarityError("OpenAI returned no text output.")
+    return "\n".join(texts)
 
 
 def _build_prompt(
@@ -160,6 +201,19 @@ def _parse_json_object(raw_text: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise LLMSimilarityError("The model response must be a JSON object.")
     return value
+
+
+def _error_details(error: Exception) -> str:
+    """Expose safe nested transport details without ever including request credentials."""
+    parts: list[str] = []
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen and len(parts) < 4:
+        seen.add(id(current))
+        message = str(current).strip() or "No additional detail"
+        parts.append(f"{type(current).__name__}: {message}")
+        current = current.__cause__ or current.__context__
+    return " Caused by ".join(parts)
 
 
 def _validated_matches(
