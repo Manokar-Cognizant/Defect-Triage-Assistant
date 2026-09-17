@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .database import Database
+from .llm_similarity import analyze_defect_with_openai
 from .reminders import PROFILES, ReminderManager, as_utc_iso, utc_now
 from .triage import STORY_POINT_SCALE, analyze_defect
 from .workflow import allowed_transitions, validate_transition
@@ -30,15 +31,27 @@ class DefectTriageService:
         payload: dict[str, Any],
         reminder_profile: str = "Standard",
         now: datetime | None = None,
+        similarity_provider: str = "local",
+        api_key: str = "",
+        model: str = "gpt-realtime",
     ) -> int:
         self._validate_payload(payload)
         if reminder_profile not in PROFILES:
             raise ValueError(f"Unknown reminder profile: {reminder_profile}")
-        analysis = analyze_defect(
-            payload,
-            self.database.get_known_errors(),
-            self.database.get_historical_defects(),
-        )
+        known_errors = self.database.get_known_errors()
+        historical_defects = self.database.get_historical_defects()
+        if similarity_provider == "openai":
+            analysis = analyze_defect_with_openai(
+                payload,
+                known_errors,
+                historical_defects,
+                api_key=api_key,
+                model=model,
+            )
+        elif similarity_provider == "local":
+            analysis = analyze_defect(payload, known_errors, historical_defects)
+        else:
+            raise ValueError(f"Unknown similarity provider: {similarity_provider}")
         timestamp = as_utc_iso(now or utc_now())
         defect_id = self.database.create_defect(payload, analysis, timestamp)
         self.reminders.create_or_reactivate(defect_id, reminder_profile, now)

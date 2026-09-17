@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Any
 
@@ -54,9 +55,17 @@ def show_triage(detail: dict[str, Any]) -> None:
     metric_columns[3].metric("Current status", defect["status"])
 
     explanations = triage["explanation"]
+    similarity_agent = explanations.get("similarity_agent", {})
     st.markdown(
         f"**Why:** {explanations['match']} {explanations['team']} {explanations['story_points']}"
     )
+    if similarity_agent:
+        timing = similarity_agent.get("duration_ms")
+        timing_text = f" · {timing} ms" if timing is not None else ""
+        st.caption(
+            f"Similarity engine: {similarity_agent.get('provider', 'Unknown')} · "
+            f"{similarity_agent.get('model', 'Unknown model')}{timing_text}"
+        )
 
     known_tab, history_tab = st.tabs(["Known-error matches", "Historical matches"])
     with known_tab:
@@ -67,6 +76,7 @@ def show_triage(detail: dict[str, Any]) -> None:
                 "Similarity": percent(match["score"]),
                 "Strength": match["match_level"],
                 "Owner": match["team_name"],
+                "AI rationale": match.get("reason", "—"),
                 "Workaround": match["workaround"],
             }
             for match in triage["known_matches"]
@@ -80,6 +90,7 @@ def show_triage(detail: dict[str, Any]) -> None:
                 "Similarity": percent(match["score"]),
                 "Owner": match["team_name"],
                 "Points": match["story_points"],
+                "AI rationale": match.get("reason", "—"),
                 "Resolution": match["resolution"],
             }
             for match in triage["historical_matches"]
@@ -106,6 +117,9 @@ def show_agent_activity(
     top_history = (
         triage["historical_matches"][0] if triage["historical_matches"] else None
     )
+    similarity_agent = triage["explanation"].get("similarity_agent", {})
+    similarity_provider = similarity_agent.get("provider", "Local")
+    similarity_model = similarity_agent.get("model", "Unknown model")
 
     stages = [
         {
@@ -121,12 +135,18 @@ def show_agent_activity(
         {
             "name": "Similarity agent",
             "state": "Complete",
-            "task": "Compare the defect with known errors and closed historical tickets.",
+            "task": (
+                "Use live semantic reasoning to compare the defect with known errors and "
+                "closed historical tickets."
+                if similarity_provider == "OpenAI"
+                else "Compare the defect with known errors and closed historical tickets."
+            ),
             "evidence": (
                 f"Top known error: {top_known['key']} ({percent(top_known['score'])}); "
-                f"top closed defect: {top_history['key']} ({percent(top_history['score'])})."
+                f"top closed defect: {top_history['key']} ({percent(top_history['score'])}). "
+                f"Engine: {similarity_provider} / {similarity_model}."
                 if top_known and top_history
-                else "The available local corpus was searched."
+                else f"The corpus was analyzed by {similarity_provider} / {similarity_model}."
             ),
             "output": triage["duplicate_classification"],
         },
@@ -191,7 +211,7 @@ defects = service.list_defects()
 
 st.title("Defect Triage Assistant Agent")
 st.caption(
-    "Local, explainable defect matching, ownership and sizing recommendations, "
+    "AI-assisted defect matching, ownership and sizing recommendations, "
     "plus lifecycle-aware reminders."
 )
 if flash_message := st.session_state.pop("flash_message", None):
@@ -204,6 +224,41 @@ with st.sidebar:
     due_count = sum(event["state"] == "Due" for event in service.list_reminder_events())
     st.metric("Due reminders", due_count)
     st.caption("All application data is synthetic and stored locally in SQLite.")
+    st.divider()
+    st.header("Similarity agent")
+    provider_label = st.radio(
+        "Engine",
+        ["OpenAI LLM", "Local offline demo"],
+        help=(
+            "OpenAI mode performs a fresh model call for each new defect. "
+            "Local mode is deterministic."
+        ),
+    )
+    similarity_provider = "openai" if provider_label == "OpenAI LLM" else "local"
+    if similarity_provider == "openai":
+        openai_model = st.text_input(
+            "Model",
+            value="gpt-realtime",
+            help=(
+                "Defaults to OpenAI's realtime text-capable model; enter another enabled "
+                "model if needed."
+            ),
+        )
+        api_key_input = st.text_input(
+            "OpenAI API key",
+            type="password",
+            placeholder="Uses OPENAI_API_KEY when left blank",
+            help="Held only in this browser session and never written to SQLite or Git.",
+        )
+        openai_api_key = api_key_input.strip() or os.getenv("OPENAI_API_KEY", "")
+        if openai_api_key:
+            st.success("API key is available.")
+        else:
+            st.warning("Add an API key before creating a defect in OpenAI mode.")
+    else:
+        openai_model = ""
+        openai_api_key = ""
+        st.info("Offline mode uses the original local TF-IDF matcher and does not call an LLM.")
 
 new_tab, agent_tab, tracker_tab, reminder_tab, knowledge_tab = st.tabs(
     ["New defect", "Agent activity", "Defect tracker", "Reminders", "Knowledge base"]
@@ -265,6 +320,9 @@ with new_tab:
                     "tags": [tag.strip() for tag in tags_text.split(",") if tag.strip()],
                 },
                 reminder_profile=profile,
+                similarity_provider=similarity_provider,
+                api_key=openai_api_key,
+                model=openai_model,
             )
             st.session_state["latest_defect_id"] = defect_id
             st.session_state["flash_message"] = "Defect created and triaged."
@@ -282,7 +340,8 @@ with agent_tab:
     st.subheader("Agent activity")
     st.caption(
         "These are logical specialist roles orchestrated inside one local process. "
-        "They are transparent workflow stages, not separate hosted AI services."
+        "The Similarity agent can call OpenAI live; the other roles remain transparent "
+        "workflow stages in this MVP."
     )
     agent_defects = service.list_defects()
     if not agent_defects:

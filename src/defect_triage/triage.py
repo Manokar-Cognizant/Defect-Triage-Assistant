@@ -26,6 +26,34 @@ def analyze_defect(
     else:
         duplicate_classification = "No strong known-error match"
 
+    match_reason = (
+        f"Top known error {known_matches[0]['key']} scored "
+        f"{known_matches[0]['score']:.0%} similarity."
+        if known_matches
+        else "No known errors were available for comparison."
+    )
+    return complete_analysis(
+        defect,
+        known_matches,
+        historical_matches,
+        historical_defects,
+        duplicate_classification=duplicate_classification,
+        match_reason=match_reason,
+        similarity_metadata={"provider": "local", "model": "TF-IDF + character n-grams"},
+    )
+
+
+def complete_analysis(
+    defect: dict[str, Any],
+    known_matches: list[dict[str, Any]],
+    historical_matches: list[dict[str, Any]],
+    historical_defects: list[dict[str, Any]],
+    *,
+    duplicate_classification: str,
+    match_reason: str,
+    similarity_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Complete downstream recommendations from similarity-agent results."""
     team_id, team_confidence, team_reason = _recommend_team(
         defect, known_matches, historical_matches, historical_defects
     )
@@ -33,12 +61,6 @@ def analyze_defect(
         defect, historical_matches, historical_defects
     )
 
-    match_reason = (
-        f"Top known error {known_matches[0]['key']} scored "
-        f"{known_matches[0]['score']:.0%} similarity."
-        if known_matches
-        else "No known errors were available for comparison."
-    )
     return {
         "duplicate_classification": duplicate_classification,
         "known_matches": known_matches,
@@ -51,6 +73,7 @@ def analyze_defect(
             "match": match_reason,
             "team": team_reason,
             "story_points": point_reason,
+            "similarity_agent": similarity_metadata,
         },
     }
 
