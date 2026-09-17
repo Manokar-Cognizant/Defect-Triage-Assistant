@@ -10,7 +10,7 @@ Azure DevOps, email, or messaging systems.
 
 ## Features
 
-- Live OpenAI similarity agent with `gpt-realtime` as the default model
+- Live OpenAI similarity agent with `gpt-4o-mini` as the reliable demo default
 - Semantic match scores, duplicate classification, and per-match AI rationale
 - Explicit offline TF-IDF fallback for demos without network access
 - Known-error and likely-duplicate detection
@@ -18,9 +18,11 @@ Azure DevOps, email, or messaging systems.
 - Historical story-point recommendation on the `1, 2, 3, 5, 8, 13` scale
 - Recommendation confidence and supporting evidence
 - Agent-activity view for intake, similarity, ownership, estimation, reminders, and lifecycle
+- Clickable defect tracker with a unified, chronological agent and lifecycle timeline
 - User overrides for team and estimate
 - Defect lifecycle and status history
 - Recurring in-app follow-up reminders
+- Local reminder-email outbox for `manokar.velayutham@cognizant.com`
 - Automatic reminder cancellation when a defect is closed
 - Synthetic known-error and closed-defect knowledge base
 - Persistent local SQLite storage
@@ -59,14 +61,14 @@ different model.
 
 ## Suggested demo
 
-1. Select **OpenAI LLM**, enter an API key, and keep `gpt-realtime` as the model.
+1. Select **OpenAI LLM**, enter an API key, and keep `gpt-4o-mini` as the model.
 2. Open **New defect** and select **Load demo defect**.
 3. Select the **Demo** reminder profile and choose **Analyze and create defect**.
 4. Review the AI rationale, known-error match, similar tickets, owner, and story points.
-5. Open **Agent activity** to show the provider, model, and every specialist stage.
-6. Open **Reminders** and choose **Make next reminder due now**.
-7. Open **Defect tracker**, move the defect through its lifecycle, and close it.
-8. Return to **Reminders** and show that future reminders were cancelled.
+5. Open **Defect tracker**, click the defect row, and show its complete agent timeline.
+6. Open **Reminders**, choose **Make next reminder due now**, and preview the prepared email.
+7. Return to **Defect tracker**, move the defect through its lifecycle, and close it.
+8. Return to **Reminders** and show that future reminders and prepared emails were cancelled.
 
 ## Tests and code quality
 
@@ -126,9 +128,11 @@ recreate its SQLite database from seed data after a reset. Local runs retain the
 ## MVP limitations
 
 - The LLM compares only the included synthetic corpus; it does not search external tickets.
-- `gpt-realtime` is called once per submitted defect through the Responses API; this MVP
-  does not need an audio/WebSocket session.
+- The selected model is called once per submitted defect through the Responses API. This
+  text workflow does not need an audio/WebSocket Realtime session.
 - Reminders are visible in the app and are not sent externally.
+- Outlook Email exists as a potential connector but is disabled by this organization's
+  administrator. Email entries are therefore honest local previews, not delivered messages.
 - Reminder checks run only while the application is active or refreshed.
 - SQLite is suitable for the local demo, not a multi-user production deployment.
 - Authentication and role-based access are outside this MVP.

@@ -7,7 +7,7 @@ from typing import Any
 import streamlit as st
 
 from defect_triage import DefectTriageService
-from defect_triage.reminders import PROFILES
+from defect_triage.reminders import DEFAULT_REMINDER_EMAIL, PROFILES
 from defect_triage.triage import STORY_POINT_SCALE
 
 st.set_page_config(
@@ -206,6 +206,42 @@ def show_agent_activity(
             output.markdown(f"**Output**  \n{stage['output']}")
 
 
+def show_defect_timeline(detail: dict[str, Any]) -> None:
+    defect = detail["defect"]
+    schedule = detail["reminder_schedule"]
+    st.markdown(f"### {defect['defect_key']} — {defect['title']}")
+    metrics = st.columns(5)
+    metrics[0].metric("Current state", defect["status"])
+    metrics[1].metric("Severity", defect["severity"])
+    metrics[2].metric("Owning team", defect.get("assigned_team_name") or "Unassigned")
+    metrics[3].metric("Story points", defect.get("accepted_story_points") or "—")
+    metrics[4].metric(
+        "Next follow-up",
+        display_time(schedule["next_due_at"]) if schedule and schedule["active"] else "Stopped",
+    )
+    with st.expander("Original defect", expanded=False):
+        st.write(defect["description"])
+        st.caption(
+            f"Logged {display_time(defect['created_at'])} · {defect['component']} · "
+            f"{defect['environment']} · Tags: {', '.join(defect['tags']) or 'none'}"
+        )
+
+    st.markdown("#### Complete activity timeline")
+    for item in detail["timeline"]:
+        with st.container(border=True):
+            timestamp, activity = st.columns([1, 4])
+            timestamp.caption(display_time(item["occurred_at"]))
+            activity.markdown(f"**{item['actor']} · {item['event']}**")
+            activity.write(item["summary"])
+            details = [
+                f"{key.replace('_', ' ').title()}: {value}"
+                for key, value in item["details"].items()
+                if value not in (None, "", [], {})
+            ]
+            if details:
+                activity.caption(" · ".join(details))
+
+
 service = get_service()
 service.process_due_reminders()
 defects = service.list_defects()
@@ -239,10 +275,10 @@ with st.sidebar:
     if similarity_provider == "openai":
         openai_model = st.text_input(
             "Model",
-            value="gpt-realtime",
+            value="gpt-4o-mini",
             help=(
-                "Defaults to OpenAI's realtime text-capable model; enter another enabled "
-                "model if needed."
+                "GPT-4o Mini is the reliable demo default. GPT-Realtime requires separate "
+                "model access and is not needed for this text workflow."
             ),
         )
         api_key_input = st.text_input(
@@ -372,9 +408,9 @@ with tracker_tab:
     if not defects:
         st.info("Create a defect to begin tracking its lifecycle.")
     else:
-        st.dataframe(
-            [
+        tracker_rows = [
                 {
+                    "ID": item["id"],
                     "Key": item["defect_key"],
                     "Title": item["title"],
                     "Status": item["status"],
@@ -384,20 +420,39 @@ with tracker_tab:
                     "Updated": display_time(item["updated_at"]),
                 }
                 for item in defects
-            ],
+            ]
+        table_event = st.dataframe(
+            tracker_rows,
             use_container_width=True,
             hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="defect-tracker-table",
         )
+        if table_event.selection.rows:
+            row_index = table_event.selection.rows[0]
+            st.session_state["tracker_selected_id"] = tracker_rows[row_index]["ID"]
         selected_id = st.selectbox(
-            "Select defect",
+            "Selected defect",
             [item["id"] for item in defects],
+            index=next(
+                (
+                    index
+                    for index, item in enumerate(defects)
+                    if item["id"] == st.session_state.get("tracker_selected_id")
+                ),
+                0,
+            ),
             format_func=lambda value: next(
                 f"{item['defect_key']} — {item['title']}" for item in defects if item["id"] == value
             ),
         )
+        st.session_state["tracker_selected_id"] = selected_id
         detail = service.get_defect_detail(selected_id)
         if detail:
             defect = detail["defect"]
+            show_defect_timeline(detail)
+            st.markdown("#### Update current state")
             action_columns = st.columns(2)
             with action_columns[0]:
                 transitions = service.available_statuses(defect["status"])
@@ -434,23 +489,16 @@ with tracker_tab:
                     st.success("Assignment and estimate saved.")
                     st.rerun()
 
-            with st.expander("Status history"):
-                st.dataframe(
-                    [
-                        {
-                            "From": event["from_status"] or "Created",
-                            "To": event["to_status"],
-                            "Changed": display_time(event["changed_at"]),
-                        }
-                        for event in detail["status_history"]
-                    ],
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            show_triage(detail)
+            with st.expander("Detailed triage evidence"):
+                show_triage(detail)
 
 with reminder_tab:
     st.subheader("Follow-up reminders")
+    st.caption(
+        f"Reminder emails are prepared for {DEFAULT_REMINDER_EMAIL}. Outlook Email is "
+        "disabled by the organization, so this MVP stores a local preview rather than "
+        "claiming external delivery."
+    )
     control_columns = st.columns(2)
     if control_columns[0].button("Check for due reminders"):
         count = service.process_due_reminders()
@@ -505,6 +553,22 @@ with reminder_tab:
             ):
                 service.acknowledge_reminder(event["id"])
                 st.rerun()
+
+    emails = service.list_reminder_emails()
+    st.markdown("#### Email outbox")
+    if not emails:
+        st.info("Trigger a reminder to prepare an email preview.")
+    else:
+        for email in emails:
+            with st.expander(
+                f"{email['state']} · {email['defect_key']} · {email['subject']}"
+            ):
+                st.write(f"**To:** {email['recipient']}")
+                st.write(email["body"])
+                st.caption(
+                    f"{email['delivery_mode']} · Prepared {display_time(email['created_at'])} · "
+                    "Not sent externally"
+                )
 
 with knowledge_tab:
     known_subtab, history_subtab = st.tabs(["Known errors", "Closed defects"])

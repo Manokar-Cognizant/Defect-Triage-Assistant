@@ -24,7 +24,7 @@ def analyze_defect_with_openai(
     historical_defects: list[dict[str, Any]],
     *,
     api_key: str,
-    model: str = "gpt-realtime",
+    model: str = "gpt-4o-mini",
     client: Any | None = None,
 ) -> dict[str, Any]:
     if not api_key.strip():
@@ -112,6 +112,8 @@ def _call_responses_api(api_key: str, model: str, prompt: str) -> dict[str, Any]
         except (ValueError, AttributeError):
             message = None
         detail = message or response.reason_phrase
+        if response.status_code == 404 and model == "gpt-realtime":
+            detail += " Choose gpt-4o-mini in the sidebar for the hackathon demo."
         raise LLMSimilarityError(f"OpenAI API returned HTTP {response.status_code}: {detail}")
 
     payload = response.json()

@@ -33,7 +33,7 @@ class DefectTriageService:
         now: datetime | None = None,
         similarity_provider: str = "local",
         api_key: str = "",
-        model: str = "gpt-realtime",
+        model: str = "gpt-4o-mini",
     ) -> int:
         self._validate_payload(payload)
         if reminder_profile not in PROFILES:
@@ -61,11 +61,27 @@ class DefectTriageService:
         defect = self.database.get_defect(defect_id)
         if not defect:
             return None
-        return {
+        triage = self.database.get_latest_triage(defect_id)
+        status_history = self.database.get_status_history(defect_id)
+        schedules = self.reminders.list_schedules()
+        schedule = next((item for item in schedules if item["defect_id"] == defect_id), None)
+        reminder_events = [
+            item for item in self.reminders.list_events() if item["defect_id"] == defect_id
+        ]
+        emails = [
+            item for item in self.database.list_reminder_emails() if item["defect_id"] == defect_id
+        ]
+        audit_events = self.database.get_defect_events(defect_id)
+        detail = {
             "defect": defect,
-            "triage": self.database.get_latest_triage(defect_id),
-            "status_history": self.database.get_status_history(defect_id),
+            "triage": triage,
+            "status_history": status_history,
+            "reminder_schedule": schedule,
+            "reminder_events": reminder_events,
+            "reminder_emails": emails,
         }
+        detail["timeline"] = self._build_timeline(detail, audit_events)
+        return detail
 
     def list_defects(self) -> list[dict[str, Any]]:
         return self.database.list_defects()
@@ -142,12 +158,131 @@ class DefectTriageService:
     def list_reminder_events(self) -> list[dict[str, Any]]:
         return self.reminders.list_events()
 
+    def list_reminder_emails(self) -> list[dict[str, Any]]:
+        return self.database.list_reminder_emails()
+
     def acknowledge_reminder(self, event_id: int) -> None:
         self.reminders.acknowledge(event_id)
 
     def force_reminder_due(self, defect_id: int) -> int:
         self.reminders.force_due(defect_id)
         return self.reminders.process_due()
+
+    @staticmethod
+    def _build_timeline(
+        detail: dict[str, Any], audit_events: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        defect = detail["defect"]
+        triage = detail["triage"]
+        timeline: list[dict[str, Any]] = [
+            {
+                "occurred_at": defect["created_at"],
+                "sequence": 10,
+                "actor": "Intake agent",
+                "event": "Defect logged",
+                "summary": (
+                    f"{defect['severity']} defect logged for {defect['component']} "
+                    f"in {defect['environment']}"
+                ),
+                "details": {"tags": defect["tags"]},
+            }
+        ]
+        if triage:
+            explanation = triage["explanation"]
+            similarity = explanation.get("similarity_agent", {})
+            top_known = triage["known_matches"][0] if triage["known_matches"] else None
+            timeline.extend(
+                [
+                    {
+                        "occurred_at": triage["created_at"],
+                        "sequence": 20,
+                        "actor": "Similarity agent",
+                        "event": "Similarity analysis",
+                        "summary": triage["duplicate_classification"],
+                        "details": {
+                            "provider": similarity.get("provider", "Local"),
+                            "model": similarity.get("model"),
+                            "top_match": top_known["key"] if top_known else None,
+                            "rationale": explanation["match"],
+                        },
+                    },
+                    {
+                        "occurred_at": triage["created_at"],
+                        "sequence": 30,
+                        "actor": "Ownership agent",
+                        "event": "Owner recommended",
+                        "summary": (
+                            f"Recommended {triage.get('recommended_team_name') or 'manual triage'} "
+                            f"at {triage['team_confidence']:.0%} confidence"
+                        ),
+                        "details": {"rationale": explanation["team"]},
+                    },
+                    {
+                        "occurred_at": triage["created_at"],
+                        "sequence": 40,
+                        "actor": "Estimation agent",
+                        "event": "Estimate recommended",
+                        "summary": (
+                            f"Recommended {triage['recommended_story_points']} story points "
+                            f"at {triage['story_point_confidence']:.0%} confidence"
+                        ),
+                        "details": {"rationale": explanation["story_points"]},
+                    },
+                ]
+            )
+
+        schedule = detail["reminder_schedule"]
+        has_schedule_audit = any(
+            item["event_type"] == "Schedule activated" for item in audit_events
+        )
+        if schedule and not has_schedule_audit:
+            timeline.append(
+                {
+                    "occurred_at": schedule["created_at"],
+                    "sequence": 50,
+                    "actor": "Reminder agent",
+                    "event": "Schedule activated",
+                    "summary": f"{schedule['profile']} follow-up schedule activated",
+                    "details": {"next_due_at": schedule["next_due_at"]},
+                }
+            )
+
+        for event in detail["status_history"]:
+            if event["from_status"] is None:
+                continue
+            timeline.append(
+                {
+                    "occurred_at": event["changed_at"],
+                    "sequence": 70,
+                    "actor": "Lifecycle agent",
+                    "event": "Status changed",
+                    "summary": f"{event['from_status']} → {event['to_status']}",
+                    "details": {},
+                }
+            )
+        for event in audit_events:
+            timeline.append(
+                {
+                    "occurred_at": event["created_at"],
+                    "sequence": 60,
+                    "actor": event["actor"],
+                    "event": event["event_type"],
+                    "summary": event["summary"],
+                    "details": event["details"],
+                }
+            )
+        for email in detail["reminder_emails"]:
+            timeline.append(
+                {
+                    "occurred_at": email["created_at"],
+                    "sequence": 65,
+                    "actor": "Email outbox",
+                    "event": email["state"],
+                    "summary": f"{email['subject']} → {email['recipient']}",
+                    "details": {"delivery_mode": email["delivery_mode"]},
+                }
+            )
+        return sorted(timeline, key=lambda item: (item["occurred_at"], item["sequence"]))
 
     @staticmethod
     def _validate_payload(payload: dict[str, Any]) -> None:
