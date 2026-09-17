@@ -12,6 +12,7 @@ dependencies = [
     "openai>=1.100,<3",
     "scikit-learn>=1.5,<2",
     "streamlit>=1.40,<2",
+    "truststore>=0.10,<1",
 ]
 
 [project.optional-dependencies]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 import time
 from typing import Any
 
@@ -35,12 +36,20 @@ def analyze_defect_with_openai(
 
     if client is None:
         try:
+            import httpx
+            import truststore
             from openai import OpenAI
         except ImportError as error:  # pragma: no cover - installation issue
             raise LLMSimilarityError(
                 "The OpenAI package is not installed. Run: pip install -r requirements.txt"
             ) from error
-        client = OpenAI(api_key=api_key)
+        # Use the operating-system trust store. This keeps TLS verification enabled
+        # while supporting managed/corporate Windows networks with a private root CA.
+        ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        client = OpenAI(
+            api_key=api_key,
+            http_client=httpx.Client(verify=ssl_context),
+        )
 
     started = time.perf_counter()
     try:
