@@ -17,8 +17,9 @@ st.set_page_config(
 )
 
 
-@st.cache_resource
 def get_service() -> DefectTriageService:
+    # The service is lightweight. Recreate it on each Streamlit rerun so hot-reloaded
+    # code never reuses an instance of an older service class definition.
     return DefectTriageService()
 
 
