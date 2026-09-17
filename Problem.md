@@ -1,25 +1,47 @@
 # Problem and Idea
 
-## Hackathon theme
+## THEME
 
-Apply agentic AI to modernize a slow, manual operational workflow with a demonstrable,
-human-reviewable solution.
+Defect Triage Assistant to help TPMs and Managers identify critical bugs, track progress,
+and deliver products efficiently.
 
-## Problem
+## IDEA
 
-Production defects arrive with inconsistent descriptions. Engineers manually search known
-errors and closed tickets, guess ownership and effort, and remember follow-ups. This delays
-triage, creates duplicate work, and allows defects to stall.
+Agents check defects against the Known Error Database (KEDB), identify the right owning
+team, recommend story points based on existing ticket-closure patterns (time and effort),
+and create a follow-up reminder schedule that continues until closure.
 
-## Idea
+## HOW_IT_WORKS
 
-The Defect Triage Assistant uses a live LLM similarity agent plus transparent workflow
-agents to find related defects, recommend an owner and story points, schedule reminders,
-track every decision, and stop follow-ups at closure. Synthetic data keeps the demo safe.
+A TPM or manager enters a production defect through the Streamlit interface or REST API.
+The similarity, ownership, and estimation agents compare it with synthetic KEDB and closed
+defect history, then return possible duplicates, the recommended team, story points, and
+supporting evidence. Lifecycle and reminder agents persist every change in SQLite, expose a
+chronological timeline, schedule follow-ups, and cancel future reminders when the defect is
+closed.
 
-## Success criteria
+## WHAT_MAKES_IT_DIFFERENT
 
-- Create and triage a defect end to end in under one minute.
-- Show evidence for every recommendation.
-- Track the complete lifecycle in one timeline.
-- Run locally without Jira, ServiceNow, or email infrastructure.
+Instead of producing an unexplained AI answer, the assistant combines live LLM semantic
+matching with validated local evidence and an auditable agent timeline. It covers the whole
+triage-to-closure workflow while allowing human overrides and an offline similarity mode.
+
+## MEASURED_RESULTS
+
+The local verification suite passes 14 automated tests with 84% measured source-code
+coverage. The REST health endpoint and interactive API documentation return HTTP 200, the
+sample knowledge base contains 20 synthetic records, and the submission ZIP is under 0.1 MB.
+Triage-time improvement against the current manual process has not yet been measured.
+
+## WHY_IT_FITS
+
+The solution directly supports TPMs and managers by surfacing likely critical duplicates,
+making ownership and effort recommendations, and keeping follow-ups visible until closure.
+It reduces repetitive manual investigation while retaining evidence and human control.
+
+## Repository and demo limitation
+
+- Git repository: https://github.com/Manokar-Cognizant/Defect-Triage-Assistant
+- The Send Reminder Agent prepares reminder-email records in a local outbox but does not
+  send external email because outbound delivery is blocked by Cognizant Zscaler in the
+  hackathon environment.

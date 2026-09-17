@@ -4,6 +4,8 @@ A local hackathon MVP that analyzes production defects, finds likely known error
 historical matches, recommends an owning team and story-point estimate, and manages
 follow-up reminders until the defect is closed.
 
+Git repository: https://github.com/Manokar-Cognizant/Defect-Triage-Assistant
+
 The application uses only synthetic defect data. Its optional OpenAI connection is used
 only for live semantic similarity analysis; it does not connect to Jira, ServiceNow,
 Azure DevOps, email, or messaging systems.
@@ -26,6 +28,10 @@ Azure DevOps, email, or messaging systems.
 - Automatic reminder cancellation when a defect is closed
 - Synthetic known-error and closed-defect knowledge base
 - Persistent local SQLite storage
+
+> **Reminder delivery limitation:** The Send Reminder Agent prepares messages in a local
+> email outbox, but it does not send external email because outbound delivery is blocked by
+> Cognizant Zscaler in the hackathon environment.
 
 ## Run locally
 
