@@ -5,6 +5,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from defect_triage.reminders import DEFAULT_REMINDER_EMAIL
 from defect_triage.service import PROJECT_ROOT, DefectTriageService
 
 
@@ -45,9 +46,11 @@ class WorkflowTests(unittest.TestCase):
 
         schedule = self.service.list_reminder_schedules()[0]
         event = self.service.list_reminder_events()[0]
+        email = self.service.list_reminder_emails()[0]
         self.assertEqual(0, schedule["active"])
         self.assertIsNone(schedule["next_due_at"])
         self.assertEqual("Cancelled", event["state"])
+        self.assertEqual("Cancelled", email["state"])
 
     def test_reopening_reactivates_reminders(self) -> None:
         self.service.change_status(self.defect_id, "Closed", now=self.now)
@@ -63,6 +66,25 @@ class WorkflowTests(unittest.TestCase):
         event = self.service.list_reminder_events()[0]
         self.service.acknowledge_reminder(event["id"])
         self.assertEqual("Acknowledged", self.service.list_reminder_events()[0]["state"])
+
+    def test_due_reminder_prepares_default_email_preview(self) -> None:
+        self.service.process_due_reminders(self.now + timedelta(seconds=31))
+        email = self.service.list_reminder_emails()[0]
+        self.assertEqual(DEFAULT_REMINDER_EMAIL, email["recipient"])
+        self.assertEqual("Prepared", email["state"])
+        self.assertEqual("Local preview", email["delivery_mode"])
+
+    def test_tracker_timeline_contains_agent_work_and_current_changes(self) -> None:
+        self.service.update_assignment(self.defect_id, "payments", 8, now=self.now)
+        detail = self.service.get_defect_detail(self.defect_id)
+        assert detail is not None
+        actors = {item["actor"] for item in detail["timeline"]}
+        self.assertIn("Intake agent", actors)
+        self.assertIn("Similarity agent", actors)
+        self.assertIn("Ownership agent", actors)
+        self.assertIn("Estimation agent", actors)
+        self.assertIn("Reminder agent", actors)
+        self.assertIn("Triage user", actors)
 
 
 if __name__ == "__main__":

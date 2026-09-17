@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Any
 
 import streamlit as st
 
 from defect_triage import DefectTriageService
-from defect_triage.reminders import PROFILES
+from defect_triage.reminders import DEFAULT_REMINDER_EMAIL, PROFILES
 from defect_triage.triage import STORY_POINT_SCALE
 
 st.set_page_config(
@@ -16,8 +17,9 @@ st.set_page_config(
 )
 
 
-@st.cache_resource
 def get_service() -> DefectTriageService:
+    # The service is lightweight. Recreate it on each Streamlit rerun so hot-reloaded
+    # code never reuses an instance of an older service class definition.
     return DefectTriageService()
 
 
@@ -54,9 +56,17 @@ def show_triage(detail: dict[str, Any]) -> None:
     metric_columns[3].metric("Current status", defect["status"])
 
     explanations = triage["explanation"]
+    similarity_agent = explanations.get("similarity_agent", {})
     st.markdown(
         f"**Why:** {explanations['match']} {explanations['team']} {explanations['story_points']}"
     )
+    if similarity_agent:
+        timing = similarity_agent.get("duration_ms")
+        timing_text = f" · {timing} ms" if timing is not None else ""
+        st.caption(
+            f"Similarity engine: {similarity_agent.get('provider', 'Unknown')} · "
+            f"{similarity_agent.get('model', 'Unknown model')}{timing_text}"
+        )
 
     known_tab, history_tab = st.tabs(["Known-error matches", "Historical matches"])
     with known_tab:
@@ -67,6 +77,7 @@ def show_triage(detail: dict[str, Any]) -> None:
                 "Similarity": percent(match["score"]),
                 "Strength": match["match_level"],
                 "Owner": match["team_name"],
+                "AI rationale": match.get("reason", "—"),
                 "Workaround": match["workaround"],
             }
             for match in triage["known_matches"]
@@ -80,6 +91,7 @@ def show_triage(detail: dict[str, Any]) -> None:
                 "Similarity": percent(match["score"]),
                 "Owner": match["team_name"],
                 "Points": match["story_points"],
+                "AI rationale": match.get("reason", "—"),
                 "Resolution": match["resolution"],
             }
             for match in triage["historical_matches"]
@@ -106,6 +118,9 @@ def show_agent_activity(
     top_history = (
         triage["historical_matches"][0] if triage["historical_matches"] else None
     )
+    similarity_agent = triage["explanation"].get("similarity_agent", {})
+    similarity_provider = similarity_agent.get("provider", "Local")
+    similarity_model = similarity_agent.get("model", "Unknown model")
 
     stages = [
         {
@@ -121,12 +136,18 @@ def show_agent_activity(
         {
             "name": "Similarity agent",
             "state": "Complete",
-            "task": "Compare the defect with known errors and closed historical tickets.",
+            "task": (
+                "Use live semantic reasoning to compare the defect with known errors and "
+                "closed historical tickets."
+                if similarity_provider == "OpenAI"
+                else "Compare the defect with known errors and closed historical tickets."
+            ),
             "evidence": (
                 f"Top known error: {top_known['key']} ({percent(top_known['score'])}); "
-                f"top closed defect: {top_history['key']} ({percent(top_history['score'])})."
+                f"top closed defect: {top_history['key']} ({percent(top_history['score'])}). "
+                f"Engine: {similarity_provider} / {similarity_model}."
                 if top_known and top_history
-                else "The available local corpus was searched."
+                else f"The corpus was analyzed by {similarity_provider} / {similarity_model}."
             ),
             "output": triage["duplicate_classification"],
         },
@@ -185,13 +206,49 @@ def show_agent_activity(
             output.markdown(f"**Output**  \n{stage['output']}")
 
 
+def show_defect_timeline(detail: dict[str, Any]) -> None:
+    defect = detail["defect"]
+    schedule = detail["reminder_schedule"]
+    st.markdown(f"### {defect['defect_key']} — {defect['title']}")
+    metrics = st.columns(5)
+    metrics[0].metric("Current state", defect["status"])
+    metrics[1].metric("Severity", defect["severity"])
+    metrics[2].metric("Owning team", defect.get("assigned_team_name") or "Unassigned")
+    metrics[3].metric("Story points", defect.get("accepted_story_points") or "—")
+    metrics[4].metric(
+        "Next follow-up",
+        display_time(schedule["next_due_at"]) if schedule and schedule["active"] else "Stopped",
+    )
+    with st.expander("Original defect", expanded=False):
+        st.write(defect["description"])
+        st.caption(
+            f"Logged {display_time(defect['created_at'])} · {defect['component']} · "
+            f"{defect['environment']} · Tags: {', '.join(defect['tags']) or 'none'}"
+        )
+
+    st.markdown("#### Complete activity timeline")
+    for item in detail["timeline"]:
+        with st.container(border=True):
+            timestamp, activity = st.columns([1, 4])
+            timestamp.caption(display_time(item["occurred_at"]))
+            activity.markdown(f"**{item['actor']} · {item['event']}**")
+            activity.write(item["summary"])
+            details = [
+                f"{key.replace('_', ' ').title()}: {value}"
+                for key, value in item["details"].items()
+                if value not in (None, "", [], {})
+            ]
+            if details:
+                activity.caption(" · ".join(details))
+
+
 service = get_service()
 service.process_due_reminders()
 defects = service.list_defects()
 
 st.title("Defect Triage Assistant Agent")
 st.caption(
-    "Local, explainable defect matching, ownership and sizing recommendations, "
+    "AI-assisted defect matching, ownership and sizing recommendations, "
     "plus lifecycle-aware reminders."
 )
 if flash_message := st.session_state.pop("flash_message", None):
@@ -204,6 +261,41 @@ with st.sidebar:
     due_count = sum(event["state"] == "Due" for event in service.list_reminder_events())
     st.metric("Due reminders", due_count)
     st.caption("All application data is synthetic and stored locally in SQLite.")
+    st.divider()
+    st.header("Similarity agent")
+    provider_label = st.radio(
+        "Engine",
+        ["OpenAI LLM", "Local offline demo"],
+        help=(
+            "OpenAI mode performs a fresh model call for each new defect. "
+            "Local mode is deterministic."
+        ),
+    )
+    similarity_provider = "openai" if provider_label == "OpenAI LLM" else "local"
+    if similarity_provider == "openai":
+        openai_model = st.text_input(
+            "Model",
+            value="gpt-4o-mini",
+            help=(
+                "GPT-4o Mini is the reliable demo default. GPT-Realtime requires separate "
+                "model access and is not needed for this text workflow."
+            ),
+        )
+        api_key_input = st.text_input(
+            "OpenAI API key",
+            type="password",
+            placeholder="Uses OPENAI_API_KEY when left blank",
+            help="Held only in this browser session and never written to SQLite or Git.",
+        )
+        openai_api_key = api_key_input.strip() or os.getenv("OPENAI_API_KEY", "")
+        if openai_api_key:
+            st.success("API key is available.")
+        else:
+            st.warning("Add an API key before creating a defect in OpenAI mode.")
+    else:
+        openai_model = ""
+        openai_api_key = ""
+        st.info("Offline mode uses the original local TF-IDF matcher and does not call an LLM.")
 
 new_tab, agent_tab, tracker_tab, reminder_tab, knowledge_tab = st.tabs(
     ["New defect", "Agent activity", "Defect tracker", "Reminders", "Knowledge base"]
@@ -265,6 +357,9 @@ with new_tab:
                     "tags": [tag.strip() for tag in tags_text.split(",") if tag.strip()],
                 },
                 reminder_profile=profile,
+                similarity_provider=similarity_provider,
+                api_key=openai_api_key,
+                model=openai_model,
             )
             st.session_state["latest_defect_id"] = defect_id
             st.session_state["flash_message"] = "Defect created and triaged."
@@ -282,7 +377,8 @@ with agent_tab:
     st.subheader("Agent activity")
     st.caption(
         "These are logical specialist roles orchestrated inside one local process. "
-        "They are transparent workflow stages, not separate hosted AI services."
+        "The Similarity agent can call OpenAI live; the other roles remain transparent "
+        "workflow stages in this MVP."
     )
     agent_defects = service.list_defects()
     if not agent_defects:
@@ -312,9 +408,9 @@ with tracker_tab:
     if not defects:
         st.info("Create a defect to begin tracking its lifecycle.")
     else:
-        st.dataframe(
-            [
+        tracker_rows = [
                 {
+                    "ID": item["id"],
                     "Key": item["defect_key"],
                     "Title": item["title"],
                     "Status": item["status"],
@@ -324,20 +420,39 @@ with tracker_tab:
                     "Updated": display_time(item["updated_at"]),
                 }
                 for item in defects
-            ],
+            ]
+        table_event = st.dataframe(
+            tracker_rows,
             use_container_width=True,
             hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="defect-tracker-table",
         )
+        if table_event.selection.rows:
+            row_index = table_event.selection.rows[0]
+            st.session_state["tracker_selected_id"] = tracker_rows[row_index]["ID"]
         selected_id = st.selectbox(
-            "Select defect",
+            "Selected defect",
             [item["id"] for item in defects],
+            index=next(
+                (
+                    index
+                    for index, item in enumerate(defects)
+                    if item["id"] == st.session_state.get("tracker_selected_id")
+                ),
+                0,
+            ),
             format_func=lambda value: next(
                 f"{item['defect_key']} — {item['title']}" for item in defects if item["id"] == value
             ),
         )
+        st.session_state["tracker_selected_id"] = selected_id
         detail = service.get_defect_detail(selected_id)
         if detail:
             defect = detail["defect"]
+            show_defect_timeline(detail)
+            st.markdown("#### Update current state")
             action_columns = st.columns(2)
             with action_columns[0]:
                 transitions = service.available_statuses(defect["status"])
@@ -374,23 +489,16 @@ with tracker_tab:
                     st.success("Assignment and estimate saved.")
                     st.rerun()
 
-            with st.expander("Status history"):
-                st.dataframe(
-                    [
-                        {
-                            "From": event["from_status"] or "Created",
-                            "To": event["to_status"],
-                            "Changed": display_time(event["changed_at"]),
-                        }
-                        for event in detail["status_history"]
-                    ],
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            show_triage(detail)
+            with st.expander("Detailed triage evidence"):
+                show_triage(detail)
 
 with reminder_tab:
     st.subheader("Follow-up reminders")
+    st.caption(
+        f"Reminder emails are prepared for {DEFAULT_REMINDER_EMAIL}. Outlook Email is "
+        "disabled by the organization, so this MVP stores a local preview rather than "
+        "claiming external delivery."
+    )
     control_columns = st.columns(2)
     if control_columns[0].button("Check for due reminders"):
         count = service.process_due_reminders()
@@ -445,6 +553,22 @@ with reminder_tab:
             ):
                 service.acknowledge_reminder(event["id"])
                 st.rerun()
+
+    emails = service.list_reminder_emails()
+    st.markdown("#### Email outbox")
+    if not emails:
+        st.info("Trigger a reminder to prepare an email preview.")
+    else:
+        for email in emails:
+            with st.expander(
+                f"{email['state']} · {email['defect_key']} · {email['subject']}"
+            ):
+                st.write(f"**To:** {email['recipient']}")
+                st.write(email["body"])
+                st.caption(
+                    f"{email['delivery_mode']} · Prepared {display_time(email['created_at'])} · "
+                    "Not sent externally"
+                )
 
 with knowledge_tab:
     known_subtab, history_subtab = st.tabs(["Known errors", "Closed defects"])

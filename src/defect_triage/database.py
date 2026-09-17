@@ -105,9 +105,34 @@ CREATE TABLE IF NOT EXISTS reminder_events (
     cancelled_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS defect_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    defect_id INTEGER NOT NULL REFERENCES defects(id) ON DELETE CASCADE,
+    actor TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS reminder_emails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reminder_event_id INTEGER NOT NULL UNIQUE REFERENCES reminder_events(id) ON DELETE CASCADE,
+    defect_id INTEGER NOT NULL REFERENCES defects(id) ON DELETE CASCADE,
+    recipient TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body TEXT NOT NULL,
+    delivery_mode TEXT NOT NULL,
+    state TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    cancelled_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_defects_status ON defects(status);
 CREATE INDEX IF NOT EXISTS idx_reminder_schedules_due ON reminder_schedules(active, next_due_at);
 CREATE INDEX IF NOT EXISTS idx_reminder_events_state ON reminder_events(state);
+CREATE INDEX IF NOT EXISTS idx_defect_events_defect ON defect_events(defect_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_reminder_emails_defect ON reminder_emails(defect_id, created_at);
 """
 
 
@@ -336,6 +361,25 @@ class Database:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def get_defect_events(self, defect_id: int) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM defect_events WHERE defect_id = ? ORDER BY id",
+                (defect_id,),
+            ).fetchall()
+        return [self._decode_row(row, ("details_json",)) for row in rows]
+
+    def list_reminder_emails(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT email.*, d.defect_key, d.title
+                FROM reminder_emails email JOIN defects d ON d.id = email.defect_id
+                ORDER BY email.id DESC
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def update_status(
         self,
         defect_id: int,
@@ -367,6 +411,17 @@ class Database:
         self, defect_id: int, team_id: str, story_points: int, updated_at: str
     ) -> None:
         with self.connect() as connection:
+            previous = connection.execute(
+                """
+                SELECT d.assigned_team_id, d.accepted_story_points, t.name AS team_name
+                FROM defects d LEFT JOIN teams t ON t.id = d.assigned_team_id
+                WHERE d.id = ?
+                """,
+                (defect_id,),
+            ).fetchone()
+            new_team = connection.execute(
+                "SELECT name FROM teams WHERE id = ?", (team_id,)
+            ).fetchone()
             connection.execute(
                 """
                 UPDATE defects
@@ -374,6 +429,29 @@ class Database:
                 WHERE id = ?
                 """,
                 (team_id, story_points, updated_at, defect_id),
+            )
+            previous_team = previous["team_name"] if previous else "Unassigned"
+            previous_points = previous["accepted_story_points"] if previous else None
+            new_team_name = new_team["name"] if new_team else team_id
+            connection.execute(
+                """
+                INSERT INTO defect_events (
+                    defect_id, actor, event_type, summary, details_json, created_at
+                ) VALUES (?, 'Triage user', 'Assignment override', ?, ?, ?)
+                """,
+                (
+                    defect_id,
+                    f"Assignment updated to {new_team_name} / {story_points} points",
+                    json.dumps(
+                        {
+                            "previous_team": previous_team,
+                            "new_team": new_team_name,
+                            "previous_points": previous_points,
+                            "new_points": story_points,
+                        }
+                    ),
+                    updated_at,
+                ),
             )
 
     @staticmethod

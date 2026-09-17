@@ -9,8 +9,10 @@ description = "Local, explainable production defect triage assistant MVP"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "httpx>=0.28,<1",
     "scikit-learn>=1.5,<2",
     "streamlit>=1.40,<2",
+    "truststore>=0.10,<1",
 ]
 
 [project.optional-dependencies]
