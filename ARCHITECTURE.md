@@ -15,7 +15,8 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  U[Streamlit UI or REST client] --> C[FastAPI controller + DTO validation]
+  U[Streamlit demo UI] --> C[FastAPI controller + DTO validation]
+  P[Jira or enterprise ticketing tool] -. Production replacement for demo UI .-> C
   C --> S[DefectTriageService]
   S --> L[OpenAI similarity agent]
   S --> O[Ownership + estimation agents]
@@ -29,3 +30,6 @@ flowchart LR
 
 The REST controller is stateless; service rules own use cases; SQLite stores demo state.
 The API key remains in memory and model responses are requested with `store=false`.
+Streamlit accelerates the hackathon demonstration. In production, Jira, ServiceNow, Azure
+DevOps, or another ticketing system becomes the primary interface and calls the same REST
+contract; Streamlit can be removed or retained as an administrative dashboard.

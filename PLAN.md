@@ -14,4 +14,6 @@
 ## Remaining production work
 
 Replace synthetic data and the local email outbox with approved enterprise connectors,
-add authentication/RBAC, move SQLite to a managed database, and add observability.
+replace Streamlit as the primary interface with Jira or another ticketing system connected
+to the REST API, add authentication/RBAC, move SQLite to a managed database, and add
+observability. Streamlit may remain as an optional administrative dashboard.

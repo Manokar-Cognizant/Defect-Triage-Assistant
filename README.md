@@ -8,7 +8,13 @@ Git repository: https://github.com/Manokar-Cognizant/Defect-Triage-Assistant
 
 The application uses only synthetic defect data. Its optional OpenAI connection is used
 only for live semantic similarity analysis; it does not connect to Jira, ServiceNow,
-Azure DevOps, email, or messaging systems.
+Azure DevOps, email, or messaging systems in the MVP.
+
+Streamlit is the lightweight demonstration interface, not the intended production ticket
+entry point. In production, Jira, ServiceNow, Azure DevOps, or another ticketing platform
+would call the existing REST service so defects, status changes, assignments, and reminders
+stay inside the organization's established workflow. Streamlit could then be removed or
+retained as an administrative and troubleshooting dashboard.
 
 ## Features
 
@@ -134,8 +140,9 @@ GitHub Actions runs the same checks for pull requests and pushes to `main`.
 ## Architecture
 
 ```text
-Streamlit UI
-    -> DefectTriageService
+Streamlit demo UI or future ticketing-system integration
+    -> FastAPI REST controller
+        -> DefectTriageService
         -> OpenAI Responses API similarity agent (or explicit local fallback)
         -> local ownership and story-point recommendation engine
         -> lifecycle and reminder managers
@@ -174,6 +181,14 @@ excludes the generated database, virtual environments, local secrets, and cache 
 For a shareable hackathon URL, the repository can be connected to Streamlit Community
 Cloud. Files written at runtime are not guaranteed to persist there, so a hosted demo will
 recreate its SQLite database from seed data after a reset. Local runs retain their data.
+
+## Production integration path
+
+The production evolution replaces Streamlit as the primary user interface with Jira or an
+equivalent enterprise ticketing tool. That platform sends new defects and lifecycle updates
+to the FastAPI endpoints and displays the returned duplicate, owner, estimate, reminder,
+and timeline information in the ticket. The core service and agents remain reusable behind
+the REST boundary, avoiding a rewrite of the triage logic.
 
 ## MVP limitations
 
