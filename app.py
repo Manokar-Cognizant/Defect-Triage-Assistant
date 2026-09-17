@@ -87,6 +87,104 @@ def show_triage(detail: dict[str, Any]) -> None:
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
+def show_agent_activity(
+    detail: dict[str, Any],
+    schedules: list[dict[str, Any]],
+    reminder_events: list[dict[str, Any]],
+) -> None:
+    defect = detail["defect"]
+    triage = detail["triage"]
+    if not triage:
+        st.warning("No agent activity is available for this defect.")
+        return
+
+    schedule = next(
+        (item for item in schedules if item["defect_id"] == defect["id"]), None
+    )
+    events = [item for item in reminder_events if item["defect_id"] == defect["id"]]
+    top_known = triage["known_matches"][0] if triage["known_matches"] else None
+    top_history = (
+        triage["historical_matches"][0] if triage["historical_matches"] else None
+    )
+
+    stages = [
+        {
+            "name": "Intake agent",
+            "state": "Complete",
+            "task": "Validate and structure the incoming production defect.",
+            "evidence": (
+                f"{defect['component']} · {defect['environment']} · "
+                f"{defect['severity']} severity · {len(defect['tags'])} tag(s)"
+            ),
+            "output": f"Created {defect['defect_key']} with status {defect['status']}.",
+        },
+        {
+            "name": "Similarity agent",
+            "state": "Complete",
+            "task": "Compare the defect with known errors and closed historical tickets.",
+            "evidence": (
+                f"Top known error: {top_known['key']} ({percent(top_known['score'])}); "
+                f"top closed defect: {top_history['key']} ({percent(top_history['score'])})."
+                if top_known and top_history
+                else "The available local corpus was searched."
+            ),
+            "output": triage["duplicate_classification"],
+        },
+        {
+            "name": "Ownership agent",
+            "state": "Complete",
+            "task": "Infer the owning team from similar work and component history.",
+            "evidence": triage["explanation"]["team"],
+            "output": (
+                f"Recommend {triage.get('recommended_team_name') or 'manual triage'} "
+                f"with {percent(triage['team_confidence'])} confidence."
+            ),
+        },
+        {
+            "name": "Estimation agent",
+            "state": "Complete",
+            "task": "Estimate effort using story points from comparable closed tickets.",
+            "evidence": triage["explanation"]["story_points"],
+            "output": (
+                f"Recommend {triage['recommended_story_points']} story points "
+                f"with {percent(triage['story_point_confidence'])} confidence."
+            ),
+        },
+        {
+            "name": "Reminder agent",
+            "state": "Monitoring" if schedule and schedule["active"] else "Stopped",
+            "task": "Schedule follow-ups while the defect remains open.",
+            "evidence": (
+                f"Profile: {schedule['profile']}; generated reminder events: {len(events)}."
+                if schedule
+                else "No reminder schedule is available."
+            ),
+            "output": (
+                f"Next follow-up: {display_time(schedule['next_due_at'])}."
+                if schedule and schedule["active"]
+                else "Future reminders are cancelled."
+            ),
+        },
+        {
+            "name": "Lifecycle agent",
+            "state": "Closed" if defect["status"] == "Closed" else "Tracking",
+            "task": "Track status changes and stop follow-ups when work is closed.",
+            "evidence": f"{len(detail['status_history'])} lifecycle event(s) recorded.",
+            "output": f"Current lifecycle status: {defect['status']}.",
+        },
+    ]
+
+    for step, stage in enumerate(stages, start=1):
+        with st.container(border=True):
+            heading, state = st.columns([4, 1])
+            heading.markdown(f"#### {step}. {stage['name']}")
+            state.markdown(f"**{stage['state']}**")
+            st.caption(stage["task"])
+            evidence, output = st.columns(2)
+            evidence.markdown(f"**Evidence**  \n{stage['evidence']}")
+            output.markdown(f"**Output**  \n{stage['output']}")
+
+
 service = get_service()
 service.process_due_reminders()
 defects = service.list_defects()
@@ -107,8 +205,8 @@ with st.sidebar:
     st.metric("Due reminders", due_count)
     st.caption("All application data is synthetic and stored locally in SQLite.")
 
-new_tab, tracker_tab, reminder_tab, knowledge_tab = st.tabs(
-    ["New defect", "Defect tracker", "Reminders", "Knowledge base"]
+new_tab, agent_tab, tracker_tab, reminder_tab, knowledge_tab = st.tabs(
+    ["New defect", "Agent activity", "Defect tracker", "Reminders", "Knowledge base"]
 )
 
 with new_tab:
@@ -179,6 +277,34 @@ with new_tab:
         latest_detail = service.get_defect_detail(latest_id)
         if latest_detail:
             show_triage(latest_detail)
+
+with agent_tab:
+    st.subheader("Agent activity")
+    st.caption(
+        "These are logical specialist roles orchestrated inside one local process. "
+        "They are transparent workflow stages, not separate hosted AI services."
+    )
+    agent_defects = service.list_defects()
+    if not agent_defects:
+        st.info("Create a defect to see each agent's evidence and output.")
+    else:
+        agent_defect_id = st.selectbox(
+            "Inspect agent work for",
+            [item["id"] for item in agent_defects],
+            format_func=lambda value: next(
+                f"{item['defect_key']} — {item['title']}"
+                for item in agent_defects
+                if item["id"] == value
+            ),
+            key="agent-defect-selector",
+        )
+        agent_detail = service.get_defect_detail(agent_defect_id)
+        if agent_detail:
+            show_agent_activity(
+                agent_detail,
+                service.list_reminder_schedules(),
+                service.list_reminder_events(),
+            )
 
 with tracker_tab:
     defects = service.list_defects()
