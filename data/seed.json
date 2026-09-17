@@ -1,0 +1,128 @@
+{
+  "teams": [
+    {"id": "payments", "name": "Payments Platform", "description": "Checkout, card processing, refunds, and payment gateways", "components": ["Checkout", "Payment Gateway", "Refunds"]},
+    {"id": "identity", "name": "Identity & Access", "description": "Authentication, authorization, sessions, and SSO", "components": ["Authentication", "Authorization", "SSO"]},
+    {"id": "orders", "name": "Order Management", "description": "Order creation, fulfillment, and inventory allocation", "components": ["Order Service", "Fulfillment", "Inventory"]},
+    {"id": "data", "name": "Data & Reporting", "description": "Analytics pipelines, operational reports, and dashboards", "components": ["Reporting", "Analytics", "Data Pipeline"]}
+  ],
+  "known_errors": [
+    {
+      "key": "KE-1001",
+      "title": "Checkout timeout after payment gateway response",
+      "description": "The checkout UI keeps spinning and eventually reports a timeout even though the external card gateway returned an authorization response.",
+      "symptoms": "Payment spinner exceeds 30 seconds; gateway response is present; order is not confirmed.",
+      "component": "Checkout",
+      "environment": "Production",
+      "workaround": "Refresh the order status before retrying payment to avoid a second authorization.",
+      "team_id": "payments",
+      "tags": ["payment", "timeout", "gateway", "spinner"]
+    },
+    {
+      "key": "KE-1002",
+      "title": "SSO session expires immediately after login",
+      "description": "Clock skew between the identity service and SSO provider causes newly issued tokens to be treated as expired.",
+      "symptoms": "Successful login redirects back to sign-in; token-expired entry appears in authentication logs.",
+      "component": "SSO",
+      "environment": "Production",
+      "workaround": "Synchronize the affected node clock and restart its identity service instance.",
+      "team_id": "identity",
+      "tags": ["sso", "login", "token", "clock-skew"]
+    },
+    {
+      "key": "KE-1003",
+      "title": "Duplicate orders created when submit request is retried",
+      "description": "A client retry can create a second order when the first request commits but its response is lost.",
+      "symptoms": "Two orders with the same basket and customer are created within seconds.",
+      "component": "Order Service",
+      "environment": "Production",
+      "workaround": "Cancel the later duplicate and avoid retrying without checking order history.",
+      "team_id": "orders",
+      "tags": ["duplicate", "order", "retry", "idempotency"]
+    },
+    {
+      "key": "KE-1004",
+      "title": "Operations dashboard displays stale daily totals",
+      "description": "A delayed aggregation job leaves the operations dashboard on the previous data partition.",
+      "symptoms": "Dashboard timestamp advances but totals do not; raw events remain available.",
+      "component": "Reporting",
+      "environment": "Production",
+      "workaround": "Rerun the daily aggregation for the affected partition.",
+      "team_id": "data",
+      "tags": ["dashboard", "stale", "aggregation", "reporting"]
+    }
+  ],
+  "historical_defects": [
+    {
+      "key": "HIST-2001",
+      "title": "Card checkout hangs after gateway authorization",
+      "description": "The gateway callback was recorded but checkout did not publish the completion event, leaving customers on a spinner.",
+      "component": "Checkout", "environment": "Production", "team_id": "payments", "story_points": 5,
+      "resolution": "Made callback processing idempotent and replayed missing completion events.",
+      "tags": ["payment", "gateway", "timeout", "callback"]
+    },
+    {
+      "key": "HIST-2002",
+      "title": "Payment gateway requests time out under peak load",
+      "description": "Connection pool exhaustion caused card authorization requests to exceed the checkout timeout.",
+      "component": "Payment Gateway", "environment": "Production", "team_id": "payments", "story_points": 5,
+      "resolution": "Adjusted connection pool sizing and added saturation metrics.",
+      "tags": ["payment", "timeout", "gateway", "capacity"]
+    },
+    {
+      "key": "HIST-2003",
+      "title": "Checkout submits payment twice after browser refresh",
+      "description": "The browser repeated a payment request without an idempotency key during a slow response.",
+      "component": "Checkout", "environment": "Production", "team_id": "payments", "story_points": 8,
+      "resolution": "Added client and server idempotency keys to payment submission.",
+      "tags": ["payment", "duplicate", "checkout", "idempotency"]
+    },
+    {
+      "key": "HIST-2004",
+      "title": "Users returned to login immediately after SSO authentication",
+      "description": "New SSO tokens failed validation because one application node had an incorrect system time.",
+      "component": "SSO", "environment": "Production", "team_id": "identity", "story_points": 3,
+      "resolution": "Corrected time synchronization and added a clock-skew health alert.",
+      "tags": ["sso", "login", "token", "clock-skew"]
+    },
+    {
+      "key": "HIST-2005",
+      "title": "Authorization cache serves revoked permissions",
+      "description": "Permission changes did not invalidate cached authorization decisions for active sessions.",
+      "component": "Authorization", "environment": "Production", "team_id": "identity", "story_points": 5,
+      "resolution": "Published invalidation events when roles and permissions change.",
+      "tags": ["authorization", "cache", "permissions", "session"]
+    },
+    {
+      "key": "HIST-2006",
+      "title": "Order API creates duplicates after response timeout",
+      "description": "A request retry created a second order because the endpoint did not retain the caller idempotency key.",
+      "component": "Order Service", "environment": "Production", "team_id": "orders", "story_points": 8,
+      "resolution": "Persisted and enforced idempotency keys for order creation.",
+      "tags": ["order", "duplicate", "retry", "idempotency"]
+    },
+    {
+      "key": "HIST-2007",
+      "title": "Bulk inventory allocation intermittently deadlocks",
+      "description": "Parallel workers acquired inventory and reservation locks in inconsistent order.",
+      "component": "Inventory", "environment": "Production", "team_id": "orders", "story_points": 5,
+      "resolution": "Standardized lock ordering and added bounded transaction retries.",
+      "tags": ["inventory", "deadlock", "database", "concurrency"]
+    },
+    {
+      "key": "HIST-2008",
+      "title": "Revenue dashboard shows yesterday's totals",
+      "description": "The daily aggregation task completed without publishing its latest partition marker.",
+      "component": "Reporting", "environment": "Production", "team_id": "data", "story_points": 3,
+      "resolution": "Made partition publication transactional with aggregation completion.",
+      "tags": ["dashboard", "stale", "aggregation", "reporting"]
+    },
+    {
+      "key": "HIST-2009",
+      "title": "Analytics events missing for mobile checkout",
+      "description": "A schema change caused the ingestion pipeline to reject checkout events from the latest mobile client.",
+      "component": "Data Pipeline", "environment": "Production", "team_id": "data", "story_points": 5,
+      "resolution": "Added schema compatibility and replayed rejected events.",
+      "tags": ["analytics", "events", "schema", "mobile"]
+    }
+  ]
+}
