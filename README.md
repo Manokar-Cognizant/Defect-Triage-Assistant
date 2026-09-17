@@ -41,6 +41,48 @@ streamlit run app.py
 
 Streamlit will display the local URL, normally `http://localhost:8501`.
 
+### Run the REST API
+
+```powershell
+python -m uvicorn defect_triage.api:app --reload --port 8000
+```
+
+Interactive API documentation is available at `http://localhost:8000/docs`.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/health` | Readiness check |
+| `GET` | `/api/defects` | List defects |
+| `POST` | `/api/defects` | Create and triage a defect |
+| `GET` | `/api/defects/{id}` | Get lifecycle, triage, reminders, and timeline |
+| `PATCH` | `/api/defects/{id}/status` | Advance the defect lifecycle |
+
+```http
+POST /api/defects
+Content-Type: application/json
+
+{"title":"Duplicate order after retry","description":"A timeout caused a retry.","component":"Order Service","environment":"Production","severity":"High","tags":["duplicate","retry"],"similarity_provider":"local","reminder_profile":"Demo"}
+```
+
+The response contains the saved defect, triage recommendations, reminders, and complete
+timeline. For OpenAI mode, set `similarity_provider` to `openai` and send the key in the
+`X-OpenAI-API-Key` header; never commit the key.
+
+Example response shape:
+
+```json
+{
+  "defect": {"id": 1, "status": "New", "title": "Duplicate order after retry"},
+  "triage": {
+    "duplicate_classification": "Potential duplicate",
+    "recommended_team_name": "Order Platform",
+    "recommended_story_points": 5
+  },
+  "reminder_schedule": {"state": "Active"},
+  "timeline": [{"actor": "Intake agent", "event": "Defect logged"}]
+}
+```
+
 The application creates `data/defect_triage.db` on first startup and seeds it from
 `data/seed.json`. The generated database is intentionally ignored by Git.
 
@@ -76,6 +118,8 @@ different model.
 python -m pip install -r requirements-dev.txt
 ruff check .
 python -m unittest discover -s tests -v
+python -m coverage run -m unittest discover -s tests
+python -m coverage report --include="src/defect_triage/*"
 python -m defect_triage.smoke
 ```
 

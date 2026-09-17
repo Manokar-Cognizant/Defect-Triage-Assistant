@@ -1,0 +1,53 @@
+{
+  "info": {
+    "_postman_id": "f35fa252-39e5-4cf5-95e8-37b8ae89b697",
+    "name": "Defect Triage Assistant",
+    "description": "Local REST API demonstration with successful creation, listing, lifecycle detail, and an edge case.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "http://localhost:8000"}
+  ],
+  "item": [
+    {
+      "name": "1 - Create and triage a defect",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Duplicate order after checkout retry\",\n  \"description\": \"The browser timed out and the retry created a second order.\",\n  \"component\": \"Order Service\",\n  \"environment\": \"Production\",\n  \"severity\": \"High\",\n  \"tags\": [\"duplicate\", \"retry\"],\n  \"reminder_profile\": \"Demo\",\n  \"similarity_provider\": \"local\"\n}"
+        },
+        "url": {"raw": "{{baseUrl}}/api/defects", "host": ["{{baseUrl}}"], "path": ["api", "defects"]}
+      },
+      "event": [{"listen": "test", "script": {"exec": ["pm.test('Created', () => pm.response.to.have.status(201));", "pm.collectionVariables.set('defectId', pm.response.json().defect.id);"]}}]
+    },
+    {
+      "name": "2 - List defects",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {"raw": "{{baseUrl}}/api/defects", "host": ["{{baseUrl}}"], "path": ["api", "defects"]}
+      },
+      "event": [{"listen": "test", "script": {"exec": ["pm.test('OK', () => pm.response.to.have.status(200));", "pm.test('Array response', () => pm.expect(pm.response.json()).to.be.an('array'));"]}}]
+    },
+    {
+      "name": "3 - Get created defect lifecycle",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {"raw": "{{baseUrl}}/api/defects/{{defectId}}", "host": ["{{baseUrl}}"], "path": ["api", "defects", "{{defectId}}"]}
+      },
+      "event": [{"listen": "test", "script": {"exec": ["pm.test('OK', () => pm.response.to.have.status(200));", "pm.test('Timeline exists', () => pm.expect(pm.response.json().timeline).to.be.an('array'));"]}}]
+    },
+    {
+      "name": "4 - Missing defect edge case",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {"raw": "{{baseUrl}}/api/defects/999999", "host": ["{{baseUrl}}"], "path": ["api", "defects", "999999"]}
+      },
+      "event": [{"listen": "test", "script": {"exec": ["pm.test('Not found', () => pm.response.to.have.status(404));"]}}]
+    }
+  ]
+}

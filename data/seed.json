@@ -123,6 +123,55 @@
       "component": "Data Pipeline", "environment": "Production", "team_id": "data", "story_points": 5,
       "resolution": "Added schema compatibility and replayed rejected events.",
       "tags": ["analytics", "events", "schema", "mobile"]
+    },
+    {
+      "key": "HIST-2010", "title": "Refund remains pending after processor confirmation",
+      "description": "Refund confirmation was received but the local payment state was not advanced.",
+      "component": "Refunds", "environment": "Production", "team_id": "payments", "story_points": 5,
+      "resolution": "Added reconciliation and idempotent refund state transitions.",
+      "tags": ["refund", "payment", "state", "reconciliation"]
+    },
+    {
+      "key": "HIST-2011", "title": "Authentication throttling rejects valid users",
+      "description": "A shared rate-limit key grouped unrelated customers during a traffic spike.",
+      "component": "Authentication", "environment": "Production", "team_id": "identity", "story_points": 3,
+      "resolution": "Scoped rate limits by tenant and user identity.",
+      "tags": ["login", "rate-limit", "authentication"]
+    },
+    {
+      "key": "HIST-2012", "title": "Fulfillment job skips newly created orders",
+      "description": "A cursor checkpoint advanced before all orders in the page were processed.",
+      "component": "Fulfillment", "environment": "Production", "team_id": "orders", "story_points": 8,
+      "resolution": "Committed checkpoints only after successful page completion.",
+      "tags": ["fulfillment", "orders", "batch", "checkpoint"]
+    },
+    {
+      "key": "HIST-2013", "title": "Inventory availability becomes negative",
+      "description": "Concurrent reservations bypassed the final stock validation.",
+      "component": "Inventory", "environment": "Production", "team_id": "orders", "story_points": 8,
+      "resolution": "Added atomic reservation constraints and conflict retries.",
+      "tags": ["inventory", "concurrency", "reservation"]
+    },
+    {
+      "key": "HIST-2014", "title": "Analytics dashboard loads without regional totals",
+      "description": "A regional dimension was omitted from the latest aggregation deployment.",
+      "component": "Analytics", "environment": "Production", "team_id": "data", "story_points": 3,
+      "resolution": "Restored the dimension and added aggregate completeness checks.",
+      "tags": ["analytics", "dashboard", "aggregation"]
+    },
+    {
+      "key": "HIST-2015", "title": "Authorization service returns stale role membership",
+      "description": "Role updates were delayed because an invalidation consumer stopped processing.",
+      "component": "Authorization", "environment": "Production", "team_id": "identity", "story_points": 5,
+      "resolution": "Added consumer health monitoring and replayed invalidation events.",
+      "tags": ["authorization", "roles", "cache", "events"]
+    },
+    {
+      "key": "HIST-2016", "title": "Payment callback processed out of order",
+      "description": "A delayed authorization callback overwrote a completed settlement state.",
+      "component": "Payment Gateway", "environment": "Production", "team_id": "payments", "story_points": 8,
+      "resolution": "Enforced monotonic payment-state transitions.",
+      "tags": ["payment", "callback", "ordering", "state"]
     }
   ]
 }
