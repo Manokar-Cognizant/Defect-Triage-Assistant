@@ -14,6 +14,7 @@ Azure DevOps, email, or messaging systems.
 - Similarity-weighted owning-team recommendation
 - Historical story-point recommendation on the `1, 2, 3, 5, 8, 13` scale
 - Recommendation confidence and supporting evidence
+- Agent-activity view for intake, similarity, ownership, estimation, reminders, and lifecycle
 - User overrides for team and estimate
 - Defect lifecycle and status history
 - Recurring in-app follow-up reminders
@@ -43,9 +44,10 @@ The application creates `data/defect_triage.db` on first startup and seeds it fr
 1. Open **New defect** and select **Load demo defect**.
 2. Select the **Demo** reminder profile and choose **Analyze and create defect**.
 3. Review the known-error match, similar closed tickets, owner, story points, and rationale.
-4. Open **Reminders** and choose **Make next reminder due now**.
-5. Open **Defect tracker** and move the defect through its lifecycle.
-6. Close it, return to **Reminders**, and show that its schedule and due reminders are cancelled.
+4. Open **Agent activity** to inspect every specialist stage's evidence and output.
+5. Open **Reminders** and choose **Make next reminder due now**.
+6. Open **Defect tracker** and move the defect through its lifecycle.
+7. Close it, return to **Reminders**, and show that its schedule and due reminders are cancelled.
 
 ## Tests and code quality
 
